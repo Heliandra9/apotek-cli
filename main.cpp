@@ -150,13 +150,13 @@ int main() {
     Barang daftarBarang[20] = {
         {1,"Panadol",3500,3300},
         {2,"Sanmol",4000,3800},
-        {3,"Tempra",12000,11500},
-        {4,"Telur 1kg",28000,27000},
-        {5,"Gula 1kg",15000,14500},
-        {6,"Minyak Goreng 1L",20000,19500},
-        {7,"Beras 5kg",65000,63000},
-        {8,"Sabun Mandi",5000,4800},
-        {9,"Shampoo Sachet",2000,1900},
+        {3,"Tolak Angin",12000,11500},
+        {4,"Betadine",28000,27000},
+        {5,"Alkohol 70%",15000,14500},
+        {6,"Perban",20000,19500},
+        {7,"Kasa",65000,63000},
+        {8,"Kapas",5000,4800},
+        {9,"Sarung tangan medis",2000,1900},
         {10,"Teh Celup",8000,7700},
         {11,"Kopi Sachet",1500,1450},
         {12,"Susu UHT 1L",18000,17500},
@@ -170,7 +170,7 @@ int main() {
         {20,"Air Mineral Galon",17500,17000}
     };
     int promo[] = {1,8,19};
-
+    //variable registrasi
     char namaKasir[50];
     char password[50];
     char validasi[50];
@@ -194,8 +194,30 @@ int main() {
             continue;
         }
 
-        printf("Regis berhasil, selamat datang %s!\n", namaKasir);
+        printf("Regis berhasil, silahkan lanjut ke proses login %s!\n", namaKasir);
         break;
+    }
+    // variable login
+    char namaKasirforLogin[50];
+    char passwordforLogin[50];
+    while (1){
+      printf("Masukkan username kasir:");
+      fgets(namaKasirforLogin, sizeof(namaKasirforLogin), stdin);
+      namaKasirforLogin[strcspn(namaKasirforLogin, "\n")] = 0;
+
+      bacaPassword("Masukkan password Min.8: ", passwordforLogin, sizeof(passwordforLogin));
+      passwordforLogin[strcspn(passwordforLogin, "\n")] = 0;
+      
+      if (strcmp(namaKasirforLogin, namaKasir) == 0) {
+        if (strcmp(passwordforLogin, password) == 0) {
+          printf("Login berhasil, selamat datang %s!\n");
+          break;
+        }else {
+          printf("Password salah!\n");
+        }
+      }else {
+        printf("Password salah\n");
+      }
     }
 
     int lanjutTransaksi = 1;
