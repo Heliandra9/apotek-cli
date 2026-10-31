@@ -170,54 +170,71 @@ int main() {
         {20,"Air Mineral Galon",17500,17000}
     };
     int promo[] = {1,8,19};
+
+    int pilihan;
+    printf("Pilih aksi:\n");
+    printf("1. Login\n");
+    printf("2. Registrasi\n");
+    printf("3. Keluar\n");
+    scanf("%d", &pilihan);
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+
     //variable registrasi
     char namaKasir[50];
     char password[50];
     char validasi[50];
-    printf("Masukkan username kasir: ");
-    fgets(namaKasir, sizeof(namaKasir), stdin);
-    namaKasir[strcspn(namaKasir, "\n")] = 0;
-
-    while (1) {
-        bacaPassword("Masukkan password Min.8: ", password, sizeof(password));
-        password[strcspn(password, "\n")] = 0;
-
-        if (strlen(password) < 8) {
-            printf("Password terlalu pendek!\n");
-            continue;
-        }
-
-        bacaPassword("Validasi password: ", validasi, sizeof(validasi));
-        validasi[strcspn(validasi, "\n")] = 0;
-        if (strcmp(password, validasi) != 0) {
-            printf("Validasi tidak cocok, ulangi.\n");
-            continue;
-        }
-
-        printf("Regis berhasil, silahkan lanjut ke proses login %s!\n", namaKasir);
-        break;
-    }
     // variable login
     char namaKasirforLogin[50];
     char passwordforLogin[50];
-    while (1){
-      printf("Masukkan username kasir:");
-      fgets(namaKasirforLogin, sizeof(namaKasirforLogin), stdin);
-      namaKasirforLogin[strcspn(namaKasirforLogin, "\n")] = 0;
 
-      bacaPassword("Masukkan password Min.8: ", passwordforLogin, sizeof(passwordforLogin));
-      passwordforLogin[strcspn(passwordforLogin, "\n")] = 0;
-      
-      if (strcmp(namaKasirforLogin, namaKasir) == 0) {
-        if (strcmp(passwordforLogin, password) == 0) {
-          printf("Login berhasil, selamat datang %s!\n");
+    if (pilihan == 2) {
+          printf("Masukkan username kasir: ");
+          fgets(namaKasir, sizeof(namaKasir), stdin);
+      namaKasir[strcspn(namaKasir, "\n")] = 0;
+
+      while (1) {
+          bacaPassword("Masukkan password Min.8: ", password, sizeof(password));
+          password[strcspn(password, "\n")] = 0;
+
+          if (strlen(password) < 8) {
+              printf("Password terlalu pendek!\n");
+              continue;
+          }
+
+          bacaPassword("Validasi password: ", validasi, sizeof(validasi));
+          validasi[strcspn(validasi, "\n")] = 0;
+          if (strcmp(password, validasi) != 0) {
+              printf("Validasi tidak cocok, ulangi.\n");
+              continue;
+          }
+
+          printf("Regis berhasil, silahkan lanjut ke proses login %s!\n\n\n", namaKasir);
           break;
-        }else {
-          printf("Password salah!\n");
-        }
-      }else {
-        printf("Password salah\n");
       }
+    }else if (pilihan == 1) {
+       while (1){
+        printf("Masukkan username kasir:");
+        fgets(namaKasirforLogin, sizeof(namaKasirforLogin), stdin);
+        namaKasirforLogin[strcspn(namaKasirforLogin, "\n")] = 0;
+
+        bacaPassword("Masukkan password Min.8: ", passwordforLogin, sizeof(passwordforLogin));
+        passwordforLogin[strcspn(passwordforLogin, "\n")] = 0;
+      
+        if (strcmp(namaKasirforLogin, namaKasir) == 0) {
+          if (strcmp(passwordforLogin, password) == 0) {
+            printf("Login berhasil, selamat datang %s!\n");
+            break;
+          }else {
+            printf("Password salah!\n");
+            continue;
+          }
+        }else {
+          printf("Password salah\n");
+          continue;
+        }
+      }
+     
     }
 
     int lanjutTransaksi = 1;
