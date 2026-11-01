@@ -1,432 +1,498 @@
-#include <stdio.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdarg>
+#include <ctime>
+#include <iostream>
+#include <sqlite3.h>
+#include <sodium.h>
+
 #ifdef _WIN32
     #include <conio.h>
-    #define CLEAR "cls"
 #else
     #include <termios.h>
     #include <unistd.h>
-    #define CLEAR "clear"
-    int getch() { /* kode di atas */ }
-#endif
-#include <stdlib.h>
-#include <time.h>
-#include <cstring>
 
-#define MAX 100
+    // getch() untuk Linux: baca 1 karakter tanpa echo dan tanpa menunggu Enter
+    int getch() {
+        struct termios lama, baru;
+        tcgetattr(STDIN_FILENO, &lama);
+        baru = lama;
+        baru.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &baru);
+        int c = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &lama);
+        return c;
+    }
+#endif
+
+#define MAX 50
+#define JUMLAH_OBAT 20
 
 typedef struct {
     int kode;
     char nama[30];
-    double hargaNormal;
-    double hargaDiskon3; // harga jika beli minimal 3
-} Barang;
+    long harga;
+} Obat;
 
 typedef struct {
-    Barang barang;
+    Obat obat;
     int jumlah;
-    int bonus;
 } Keranjang;
 
-// Buffer struk
+// ===================== BUFFER STRUK =====================
 char bufferStruk[20000];
 int pos = 0;
 
-// Makro untuk print ke layar + simpan ke buffer
-#define PRINT_BUFFER(...) do { \
-    pos += sprintf(bufferStruk+pos, __VA_ARGS__); \
-    printf(__VA_ARGS__); \
-} while(0)
+// Print ke layar sekaligus simpan ke buffer struk
+void cetak(const char* fmt, ...) {
+    va_list args, salinan;
+    va_start(args, fmt);
+    va_copy(salinan, args);
+    vprintf(fmt, args);
+    va_end(args);
 
-// Fungsi print harga ke layar
-void printRupiah(double value){
-    long n = (long)value;
-    char temp[20];
-    sprintf(temp,"%ld",n);
-    int len = strlen(temp);
-    for(int i=0;i<len;i++){
-        printf("%c", temp[i]);
-        if((len-i-1)%3==0 && i!=len-1) printf(".");
+    if (pos < (int)sizeof(bufferStruk) - 1) {
+        int n = vsnprintf(bufferStruk + pos, sizeof(bufferStruk) - pos, fmt, salinan);
+        if (n > 0) pos += n;
+        if (pos >= (int)sizeof(bufferStruk)) pos = sizeof(bufferStruk) - 1;
     }
-    printf(",00");
+    va_end(salinan);
 }
 
-// Fungsi print harga ke layar + buffer
-void printRupiahBuffer(double value){
-    long n = (long)value;
-    char temp[30];
-    sprintf(temp,"%ld",n);
-    int len = strlen(temp);
-    for(int i=0;i<len;i++){
-        pos += sprintf(bufferStruk+pos,"%c", temp[i]);
-        printf("%c", temp[i]);
-        if((len-i-1)%3==0 && i!=len-1){
-            pos += sprintf(bufferStruk+pos,".");
-            printf(".");
+void cetakTengah(const char* teks, int lebar) {
+    int pad = (lebar - (int)strlen(teks)) / 2;
+    for (int i = 0; i < pad; i++) cetak(" ");
+    cetak("%s\n", teks);
+}
+
+// Format angka menjadi "12.500,00"
+void formatRupiah(long nilai, char* out, size_t ukuran) {
+    char temp[32];
+    snprintf(temp, sizeof(temp), "%ld", nilai);
+    int len = (int)strlen(temp);
+    size_t j = 0;
+    for (int i = 0; i < len && j + 5 < ukuran; i++) {
+        out[j++] = temp[i];
+        if ((len - i - 1) % 3 == 0 && i != len - 1) out[j++] = '.';
+    }
+    out[j] = '\0';
+    strncat(out, ",00", ukuran - j - 1);
+}
+
+// ===================== INPUT =====================
+// Buang sisa karakter di buffer stdin sampai newline
+void buangSisaInput() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+}
+
+void bacaTeks(const char* prompt, char* buf, size_t ukuran) {
+    printf("%s", prompt);
+    fflush(stdout);
+    if (!fgets(buf, (int)ukuran, stdin)) exit(0);  // EOF
+    if (!strchr(buf, '\n')) buangSisaInput();      // input kepanjangan
+    buf[strcspn(buf, "\n")] = '\0';
+}
+
+// Baca bilangan bulat dengan validasi (tidak looping tanpa henti kalau input huruf)
+int bacaInt(const char* prompt) {
+    char baris[32];
+    while (true) {
+        printf("%s", prompt);
+        fflush(stdout);
+        if (!fgets(baris, sizeof(baris), stdin)) exit(0);  // EOF
+        if (!strchr(baris, '\n')) {
+            buangSisaInput();
+            printf("Input terlalu panjang!\n");
+            continue;
         }
+        char* akhir;
+        long v = strtol(baris, &akhir, 10);
+        if (akhir != baris && *akhir == '\n') return (int)v;
+        printf("Input harus berupa angka!\n");
     }
-    pos += sprintf(bufferStruk+pos,",00");
-    printf(",00");
 }
 
-
-void bacaPassword(const char *prompt, char *buf, size_t ukuran) {
-    struct termios lama, baru;
-    tcgetattr(STDIN_FILENO, &lama);      // simpan pengaturan terminal asli
-    baru = lama;
-    baru.c_lflag &= ~(ECHO | ICANON);    // matikan echo & mode baris
-    tcsetattr(STDIN_FILENO, TCSANOW, &baru);
-
+// Baca password dengan tampilan bintang (*)
+void bacaPassword(const char* prompt, char* buf, size_t ukuran) {
     printf("%s", prompt);
     fflush(stdout);
 
     size_t i = 0;
     int c;
-    while ((c = getchar()) != '\n' && c != EOF) {
-        if (c == 127 || c == 8) {        // backspace
+    while ((c = getch()) != '\n' && c != '\r' && c != EOF) {
+        if (c == 127 || c == 8) {              // backspace
             if (i > 0) {
                 i--;
                 printf("\b \b");
                 fflush(stdout);
             }
-        } else if (i < ukuran - 1) {
-            buf[i++] = c;
+        } else if (i < ukuran - 1 && c >= 32) {
+            buf[i++] = (char)c;
             putchar('*');
             fflush(stdout);
         }
     }
-    buf[i] = 0;
+    buf[i] = '\0';
     printf("\n");
-
-    tcsetattr(STDIN_FILENO, TCSANOW, &lama);  // kembalikan terminal
 }
-// Fungsi input uang tunai interaktif
-long inputTunai(){
-    char input[20]="";
-    int len=0;
-    char ch;
-    long uang=0;
+
+// Input uang tunai interaktif (tampil format rupiah saat mengetik)
+long inputTunai() {
+    char input[20] = "";
+    int len = 0;
+    char fmt[40];
 
     printf("Masukkan Uang Bayar : Rp. ");
+    fflush(stdout);
 
-    while(1){
-        ch=getch();
-        if(ch==13) break; // Enter
-        else if(ch==8 && len>0){ // Backspace
+    while (true) {
+        int ch = getch();
+        if (ch == 13 || ch == 10) break;                       // Enter
+        else if ((ch == 8 || ch == 127) && len > 0) {          // Backspace
             len--;
-            input[len]='\0';
-        }
-        else if(ch>='0' && ch<='9' && len<18){
-            input[len++]=ch;
-            input[len]='\0';
+            input[len] = '\0';
+        } else if (ch >= '0' && ch <= '9' && len < 18) {
+            input[len++] = (char)ch;
+            input[len] = '\0';
         }
 
-        // Clear baris dan print ulang
-        printf("\rMasukkan Uang Bayar : Rp.            ");
+        printf("\rMasukkan Uang Bayar : Rp.                              ");
         printf("\rMasukkan Uang Bayar : Rp. ");
-        if(len>0){
-            long num = atol(input);
-            printRupiah(num);
+        if (len > 0) {
+            formatRupiah(atol(input), fmt, sizeof(fmt));
+            printf("%s", fmt);
         }
         fflush(stdout);
     }
     printf("\n");
-    uang = atol(input);
-    return uang;
+    return atol(input);
 }
 
-// Fungsi print rata tengah
-void printCenter(const char *text, int width){
-    int len = strlen(text);
-    int pad = (width - len) / 2;
-    for(int i=0;i<pad;i++){ printf(" "); pos += sprintf(bufferStruk+pos," "); }
-    printf("%s\n", text);
-    pos += sprintf(bufferStruk+pos,"%s\n", text);
+// ===================== DATABASE USER =====================
+bool buatTabelUser(sqlite3* db) {
+    const char* sql =
+        "CREATE TABLE IF NOT EXISTS users ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "username TEXT NOT NULL UNIQUE,"
+        "password_hash TEXT NOT NULL,"
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP);";
+    char* errMsg = nullptr;
+    if (sqlite3_exec(db, sql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Error: " << errMsg << "\n";
+        sqlite3_free(errMsg);
+        return false;
+    }
+    return true;
 }
 
+bool registrasiUser(sqlite3* db, const char* username, const char* password) {
+    char hash[crypto_pwhash_STRBYTES];
+    if (crypto_pwhash_str(hash, password, strlen(password),
+                          crypto_pwhash_OPSLIMIT_INTERACTIVE,
+                          crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0) return false;
+
+    sqlite3_stmt* stmt;
+    const char* sql = "INSERT INTO users (username, password_hash) VALUES (?, ?);";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, hash, -1, SQLITE_TRANSIENT);
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);  // false jika username sudah ada
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool loginUser(sqlite3* db, const char* username, const char* password) {
+    sqlite3_stmt* stmt;
+    const char* sql = "SELECT password_hash FROM users WHERE username = ?;";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_TRANSIENT);
+
+    bool valid = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char* hash = (const char*)sqlite3_column_text(stmt, 0);
+        if (hash) valid = (crypto_pwhash_str_verify(hash, password, strlen(password)) == 0);
+    }
+    sqlite3_finalize(stmt);
+    return valid;
+}
+
+// ===================== MAIN =====================
 int main() {
-    srand(time(NULL));
-
-    Barang daftarBarang[20] = {
-        {1,"Panadol",3500,3300},
-        {2,"Sanmol",4000,3800},
-        {3,"Tolak Angin",12000,11500},
-        {4,"Betadine",28000,27000},
-        {5,"Alkohol 70%",15000,14500},
-        {6,"Perban",20000,19500},
-        {7,"Kasa",65000,63000},
-        {8,"Kapas",5000,4800},
-        {9,"Sarung tangan medis",2000,1900},
-        {10,"Teh Celup",8000,7700},
-        {11,"Kopi Sachet",1500,1450},
-        {12,"Susu UHT 1L",18000,17500},
-        {13,"Keju Cheddar",25000,24500},
-        {14,"Mentega 200g",12000,11500},
-        {15,"Coklat Batangan",10000,9500},
-        {16,"Kecap Manis",9000,8700},
-        {17,"Saus Sambal",11000,10500},
-        {18,"Tepung Terigu 1kg",14000,13500},
-        {19,"Mie Instan Kari",3500,3300},
-        {20,"Air Mineral Galon",17500,17000}
-    };
-    int promo[] = {1,8,19};
-
-    int pilihan;
-    printf("Pilih aksi:\n");
-    printf("1. Login\n");
-    printf("2. Registrasi\n");
-    printf("3. Keluar\n");
-    scanf("%d", &pilihan);
-    int c;
-    while ((c = getchar()) != '\n' && c != EOF);
-
-    //variable registrasi
-    char namaKasir[50];
-    char password[50];
-    char validasi[50];
-    // variable login
-    char namaKasirforLogin[50];
-    char passwordforLogin[50];
-
-    if (pilihan == 2) {
-          printf("Masukkan username kasir: ");
-          fgets(namaKasir, sizeof(namaKasir), stdin);
-      namaKasir[strcspn(namaKasir, "\n")] = 0;
-
-      while (1) {
-          bacaPassword("Masukkan password Min.8: ", password, sizeof(password));
-          password[strcspn(password, "\n")] = 0;
-
-          if (strlen(password) < 8) {
-              printf("Password terlalu pendek!\n");
-              continue;
-          }
-
-          bacaPassword("Validasi password: ", validasi, sizeof(validasi));
-          validasi[strcspn(validasi, "\n")] = 0;
-          if (strcmp(password, validasi) != 0) {
-              printf("Validasi tidak cocok, ulangi.\n");
-              continue;
-          }
-
-          printf("Regis berhasil, silahkan lanjut ke proses login %s!\n\n\n", namaKasir);
-          break;
-      }
-    }else if (pilihan == 1) {
-       while (1){
-        printf("Masukkan username kasir:");
-        fgets(namaKasirforLogin, sizeof(namaKasirforLogin), stdin);
-        namaKasirforLogin[strcspn(namaKasirforLogin, "\n")] = 0;
-
-        bacaPassword("Masukkan password Min.8: ", passwordforLogin, sizeof(passwordforLogin));
-        passwordforLogin[strcspn(passwordforLogin, "\n")] = 0;
-      
-        if (strcmp(namaKasirforLogin, namaKasir) == 0) {
-          if (strcmp(passwordforLogin, password) == 0) {
-            printf("Login berhasil, selamat datang %s!\n");
-            break;
-          }else {
-            printf("Password salah!\n");
-            continue;
-          }
-        }else {
-          printf("Password salah\n");
-          continue;
-        }
-      }
-     
+    if (sodium_init() < 0) {
+        std::cerr << "Gagal inisialisasi libsodium\n";
+        return 1;
     }
 
-    int lanjutTransaksi = 1;
+    sqlite3* db;
+    if (sqlite3_open("data.db", &db) != SQLITE_OK) {
+        std::cerr << "Gagal membuka database: " << sqlite3_errmsg(db) << "\n";
+        return 1;
+    }
+    if (!buatTabelUser(db)) {
+        sqlite3_close(db);
+        return 1;
+    }
+
+    srand((unsigned)time(NULL));
+
+    Obat daftarObat[JUMLAH_OBAT] = {
+        {1,  "Panadol",              3500},
+        {2,  "Sanmol",               4000},
+        {3,  "Paramex",              3000},
+        {4,  "Bodrex",               3500},
+        {5,  "Promag",               9000},
+        {6,  "Mylanta Tablet",       8500},
+        {7,  "Tolak Angin",         12000},
+        {8,  "Antangin JRG",         3500},
+        {9,  "Betadine 15ml",       28000},
+        {10, "Alkohol 70%",         15000},
+        {11, "Perban",              20000},
+        {12, "Kasa Steril",         65000},
+        {13, "Kapas",                5000},
+        {14, "Sarung Tangan Medis",  2000},
+        {15, "Masker Medis",         3000},
+        {16, "Vitamin C IPI",       15000},
+        {17, "Hansaplast",           6000},
+        {18, "Minyak Kayu Putih",   18000},
+        {19, "Oralit",               2500},
+        {20, "Termometer Digital",  35000}
+    };
+
+    // ---------- Menu login / registrasi ----------
+    char kasirAktif[50] = "";
+    bool sudahLogin = false;
+
+    while (!sudahLogin) {
+        printf("\nPilih aksi:\n1. Login\n2. Registrasi\n3. Keluar\n");
+        int pilihan = bacaInt("> ");
+
+        char user[50], pass[50], validasi[50];
+
+        if (pilihan == 1) {
+            bacaTeks("Masukkan username kasir: ", user, sizeof(user));
+            bacaPassword("Masukkan password: ", pass, sizeof(pass));
+
+            if (loginUser(db, user, pass)) {
+                strcpy(kasirAktif, user);
+                printf("Login berhasil, selamat datang %s!\n", kasirAktif);
+                sudahLogin = true;
+            } else {
+                printf("Username atau password salah!\n");
+            }
+        } else if (pilihan == 2) {
+            bacaTeks("Masukkan username kasir: ", user, sizeof(user));
+            if (strlen(user) == 0) {
+                printf("Username tidak boleh kosong!\n");
+                continue;
+            }
+            bacaPassword("Masukkan password (min. 8): ", pass, sizeof(pass));
+            bacaPassword("Validasi password: ", validasi, sizeof(validasi));
+
+            if (strlen(pass) < 8)
+                printf("Password terlalu pendek!\n");
+            else if (strcmp(pass, validasi) != 0)
+                printf("Validasi tidak cocok!\n");
+            else if (registrasiUser(db, user, pass))
+                printf("Registrasi berhasil, silakan login.\n");
+            else
+                printf("Registrasi gagal (username mungkin sudah dipakai).\n");
+        } else if (pilihan == 3) {
+            sqlite3_close(db);
+            return 0;
+        } else {
+            printf("Pilihan tidak valid!\n");
+        }
+    }
+
+    // ---------- Transaksi ----------
+    bool lanjutTransaksi = true;
 
     do {
-        pos = 0; // Reset buffer struk
+        pos = 0;  // reset buffer struk
+        bufferStruk[0] = '\0';
         Keranjang keranjang[MAX];
         int idx = 0;
-        int kode;
+        char fmt1[40], fmt2[40];
 
-        printf("\n=== PROGRAM KASIR DIEN MART ===\nDaftar Barang:\n");
-        for(int i=0;i<20;i++){
-            printf("%2d. %-20s Rp. ", daftarBarang[i].kode, daftarBarang[i].nama);
-            printRupiah(daftarBarang[i].hargaNormal);
-            printf("\n");
+        printf("\n=== PROGRAM KASIR DIEN MART ===\nDaftar Obat:\n");
+        for (int i = 0; i < JUMLAH_OBAT; i++) {
+            formatRupiah(daftarObat[i].harga, fmt1, sizeof(fmt1));
+            printf("%2d. %-22s Rp. %s\n", daftarObat[i].kode, daftarObat[i].nama, fmt1);
         }
 
-        while(1){
-            printf("Masukkan kode barang (0 untuk selesai): ");
-            scanf("%d",&kode);
-            if(kode==0) break;
-            if(kode<1 || kode>20){ printf("Kode tidak valid!\n"); continue; }
+        while (true) {
+            int kode = bacaInt("Masukkan kode obat (0 untuk selesai): ");
+            if (kode == 0) break;
+            if (kode < 1 || kode > JUMLAH_OBAT) {
+                printf("Kode tidak valid!\n");
+                continue;
+            }
+            if (idx >= MAX) {
+                printf("Keranjang penuh (maks. %d jenis obat)!\n", MAX);
+                break;
+            }
 
-            int jumlah;
-            printf("Masukkan jumlah beli: ");
-            scanf("%d",&jumlah);
-            if(jumlah<=0){ printf("Jumlah tidak valid!\n"); continue; }
+            int jumlah = bacaInt("Masukkan jumlah beli: ");
+            if (jumlah <= 0) {
+                printf("Jumlah tidak valid!\n");
+                continue;
+            }
 
-            keranjang[idx].barang = daftarBarang[kode-1];
-            if(jumlah>=3) keranjang[idx].barang.hargaNormal = keranjang[idx].barang.hargaDiskon3;
-
-            int isPromo=0;
-            for(int i=0;i<3;i++) if(kode==promo[i]) isPromo=1;
-            if(isPromo && jumlah>=5) keranjang[idx].bonus = jumlah/5;
-            else keranjang[idx].bonus=0;
-
+            keranjang[idx].obat = daftarObat[kode - 1];
             keranjang[idx].jumlah = jumlah;
             idx++;
         }
 
-        int totalItem=0;
-        double totalBelanja=0;
-        for(int i=0;i<idx;i++){
-            totalItem += keranjang[i].jumlah + keranjang[i].bonus;
-            totalBelanja += keranjang[i].jumlah * keranjang[i].barang.hargaNormal;
-        }
-        double diskon = (totalBelanja>=250000)? totalBelanja*0.05 : 0;
-        double ppn = (totalBelanja-diskon)*0.11;
-        double totalPlusPPN = (totalBelanja-diskon)+ppn;
-        double totalDibulat = ((int)(totalPlusPPN/100))*100;
-
-        // ==== COUNTER (dibaca dulu) ====
-        int nomorStruk = 1;
-        FILE *fcounter = fopen("counter.txt","r");
-        if(fcounter){
-            fscanf(fcounter,"%d",&nomorStruk);
-            fclose(fcounter);
-        }
-
-        time_t t = time(NULL);
-        struct tm tm = *localtime(&t);
-        char bufferDate[20];
-        sprintf(bufferDate,"%02d%02d%02d",tm.tm_mday,tm.tm_mon+1,tm.tm_year%100);
-
-        // kode unik random 3 digit
-        int kodeUnik = rand()%1000;
-
-        // HEADER STRUK
-        PRINT_BUFFER("\n============================================================\n");
-        PRINT_BUFFER("                         DIEN MART\n");
-        PRINT_BUFFER("                Jl. Merdeka No.123, Surabaya\n");
-        PRINT_BUFFER("                    Telp: (031) 1234567\n");
-        PRINT_BUFFER("============================================================\n");
-        PRINT_BUFFER("STRUK#%03d\n",nomorStruk);
-        PRINT_BUFFER("RefID Struk      : TRX%s%02d-%03d\n",bufferDate,tm.tm_hour,kodeUnik);
-        PRINT_BUFFER("Tanggal          : %02d-%02d-%04d %02d:%02d:%02d\n",
-            tm.tm_mday, tm.tm_mon+1, tm.tm_year+1900,
-            tm.tm_hour, tm.tm_min, tm.tm_sec);
-        PRINT_BUFFER("Kasir            : %s\n",namaKasir);
-        PRINT_BUFFER("============================================================\n");
-
-        // DAFTAR BELANJA
-        PRINT_BUFFER("%-20s %-18s %-7s %-10s\n","Nama Barang","Harga","Qty","Ket");
-        for(int i=0;i<idx;i++){
-            if(keranjang[i].bonus > 0){
-                PRINT_BUFFER("%-20s Rp. %-15ld %-7d Bonus %d\n",
-                    keranjang[i].barang.nama,
-                    (long)keranjang[i].barang.hargaNormal,
-                    keranjang[i].jumlah,
-                    keranjang[i].bonus
-                );
-            } else {
-                PRINT_BUFFER("%-20s Rp. %-15ld %-7d -\n",
-                    keranjang[i].barang.nama,
-                    (long)keranjang[i].barang.hargaNormal,
-                    keranjang[i].jumlah
-                );
-            }
-            PRINT_BUFFER("   Rp. %ld,00\n", (long)(keranjang[i].jumlah * keranjang[i].barang.hargaNormal));
-        }
-
-        // TOTAL
-        PRINT_BUFFER("============================================================\n");
-        PRINT_BUFFER("%-20s : %d\n","Jumlah Item",totalItem);
-        PRINT_BUFFER("%-20s : Rp. ", "Total Belanja"); printRupiahBuffer(totalBelanja); PRINT_BUFFER("\n");
-        PRINT_BUFFER("%-20s : Rp. ", "Diskon"); printRupiahBuffer(diskon); PRINT_BUFFER("\n");
-        PRINT_BUFFER("%-20s : Rp. ", "PPN (11%)"); printRupiahBuffer(ppn); PRINT_BUFFER("\n");
-        PRINT_BUFFER("%-20s : Rp. ", "Total + PPN"); printRupiahBuffer(totalPlusPPN); PRINT_BUFFER("\n");
-        PRINT_BUFFER("%-20s : Rp. ", "Total Dibulat"); printRupiahBuffer(totalDibulat); PRINT_BUFFER("\n");
-        PRINT_BUFFER("============================================================\n");
-
-        // PEMBAYARAN
-        int metode;
-        printf("Pilih metode bayar [1. Tunai | 2. E-Wallet]: ");
-        scanf("%d",&metode);
-
-        int statusLunas = 0;
-        int c;
-        while ((c = getchar()) != '\n' && c != EOF);
-
-        if(metode==1){
-            long uangBayar;
-            while(1){
-                uangBayar = inputTunai();
-                if(uangBayar < (long)totalDibulat){
-                    printf("Pembayaran Tidak Valid, uang kurang! Silakan ulangi.\n");
-                } else break;
-            }
-            PRINT_BUFFER("%-20s : Rp. ", "Uang Bayar Masuk"); printRupiahBuffer(uangBayar); PRINT_BUFFER("\n");
-            PRINT_BUFFER("%-20s : Rp. ", "Kembalian"); printRupiahBuffer(uangBayar-(long)totalDibulat); PRINT_BUFFER("\n");
-            PRINT_BUFFER("%-20s : %s\n", "Status", "LUNAS");
-            PRINT_BUFFER("============================================================\n");
-            statusLunas = 1;
+        if (idx == 0) {
+            printf("Keranjang kosong, transaksi dibatalkan.\n");
         } else {
-            int ewallet;
-            printf("Pilih e-wallet [1. OVO | 2. GoPay | 3. Dana | 4. ShopeePay | 5. Lain]: ");
-            scanf("%d",&ewallet);
-            char *namaEwallet;
-            switch(ewallet){
-                case 1: namaEwallet="OVO"; break;
-                case 2: namaEwallet="GoPay"; break;
-                case 3: namaEwallet="Dana"; break;
-                case 4: namaEwallet="ShopeePay"; break;
-                default: namaEwallet="E-Wallet Lain"; break;
+            long totalItem = 0;
+            long totalBelanja = 0;
+            for (int i = 0; i < idx; i++) {
+                totalItem += keranjang[i].jumlah;
+                totalBelanja += (long)keranjang[i].jumlah * keranjang[i].obat.harga;
             }
-            char refIDEwallet[40];
-            sprintf(refIDEwallet,"EWL%s%03d-%03d",bufferDate,nomorStruk,kodeUnik);
+            double ppn = totalBelanja * 0.11;
+            double totalPlusPPN = totalBelanja + ppn;
+            long totalDibulat = ((long)(totalPlusPPN / 100)) * 100;
 
-            PRINT_BUFFER("Pembayaran via E-Wallet\n");
-            PRINT_BUFFER("%-20s : %s\n","Tipe", namaEwallet);
-            PRINT_BUFFER("%-20s : %s\n","RefID E-Wallet", refIDEwallet);
-            PRINT_BUFFER("%-20s : %s\n","Status", "LUNAS");
-            PRINT_BUFFER("============================================================\n");
-            statusLunas = 1;
-        }
+            // Nomor struk dari counter.txt
+            int nomorStruk = 1;
+            FILE* fcounter = fopen("counter.txt", "r");
+            if (fcounter) {
+                if (fscanf(fcounter, "%d", &nomorStruk) != 1) nomorStruk = 1;
+                fclose(fcounter);
+            }
 
-        // FOOTER
-        PRINT_BUFFER("------------------------------------------------------------\n");
-        printCenter("Terima kasih sudah belanja!",60);
-        printCenter("Belanja hemat? Ya di DIEN MART!",60);
-        printCenter("Diskon 5% untuk belanja >= Rp250.000",60);
-        PRINT_BUFFER("============================================================\n");
+            time_t t = time(NULL);
+            struct tm tm = *localtime(&t);
+            char bufferDate[20];
+            snprintf(bufferDate, sizeof(bufferDate), "%02d%02d%02d",
+                     tm.tm_mday, tm.tm_mon + 1, tm.tm_year % 100);
 
-        // SIMPAN FILE JIKA LUNAS
-        if(statusLunas){
+            int kodeUnik = rand() % 1000;
+
+            // HEADER STRUK
+            cetak("\n============================================================\n");
+            cetak("                         DIEN MART\n");
+            cetak("                Jl. Merdeka No.123, Surabaya\n");
+            cetak("                    Telp: (031) 1234567\n");
+            cetak("============================================================\n");
+            cetak("STRUK#%03d\n", nomorStruk);
+            cetak("RefID Struk      : TRX%s%02d-%03d\n", bufferDate, tm.tm_hour, kodeUnik);
+            cetak("Tanggal          : %02d-%02d-%04d %02d:%02d:%02d\n",
+                  tm.tm_mday, tm.tm_mon + 1, tm.tm_year + 1900,
+                  tm.tm_hour, tm.tm_min, tm.tm_sec);
+            cetak("Kasir            : %s\n", kasirAktif);
+            cetak("============================================================\n");
+
+            // DAFTAR BELANJA
+            cetak("%-20s %-15s %-5s %s\n", "Nama Obat", "Harga", "Qty", "Subtotal");
+            for (int i = 0; i < idx; i++) {
+                formatRupiah(keranjang[i].obat.harga, fmt1, sizeof(fmt1));
+                formatRupiah((long)keranjang[i].jumlah * keranjang[i].obat.harga,
+                             fmt2, sizeof(fmt2));
+                cetak("%-20s %-15s %-5d %s\n",
+                      keranjang[i].obat.nama, fmt1, keranjang[i].jumlah, fmt2);
+            }
+
+            // TOTAL
+            cetak("============================================================\n");
+            cetak("%-20s : %ld\n", "Jumlah Item", totalItem);
+            formatRupiah(totalBelanja, fmt1, sizeof(fmt1));
+            cetak("%-20s : Rp. %s\n", "Total Belanja", fmt1);
+            formatRupiah((long)ppn, fmt1, sizeof(fmt1));
+            cetak("%-20s : Rp. %s\n", "PPN (11%)", fmt1);
+            formatRupiah((long)totalPlusPPN, fmt1, sizeof(fmt1));
+            cetak("%-20s : Rp. %s\n", "Total + PPN", fmt1);
+            formatRupiah(totalDibulat, fmt1, sizeof(fmt1));
+            cetak("%-20s : Rp. %s\n", "Total Dibulat", fmt1);
+            cetak("============================================================\n");
+
+            // PEMBAYARAN
+            int metode;
+            while (true) {
+                metode = bacaInt("Pilih metode bayar [1. Tunai | 2. E-Wallet]: ");
+                if (metode == 1 || metode == 2) break;
+                printf("Pilihan tidak valid!\n");
+            }
+
+            if (metode == 1) {
+                long uangBayar;
+                while (true) {
+                    uangBayar = inputTunai();
+                    if (uangBayar < totalDibulat) {
+                        printf("Pembayaran tidak valid, uang kurang! Silakan ulangi.\n");
+                    } else break;
+                }
+                formatRupiah(uangBayar, fmt1, sizeof(fmt1));
+                cetak("%-20s : Rp. %s\n", "Uang Bayar Masuk", fmt1);
+                formatRupiah(uangBayar - totalDibulat, fmt1, sizeof(fmt1));
+                cetak("%-20s : Rp. %s\n", "Kembalian", fmt1);
+                cetak("%-20s : %s\n", "Status", "LUNAS");
+                cetak("============================================================\n");
+            } else {
+                int ewallet;
+                while (true) {
+                    ewallet = bacaInt("Pilih e-wallet [1. OVO | 2. GoPay | 3. Dana | 4. ShopeePay | 5. Lain]: ");
+                    if (ewallet >= 1 && ewallet <= 5) break;
+                    printf("Pilihan tidak valid!\n");
+                }
+                const char* namaEwallet;
+                switch (ewallet) {
+                    case 1: namaEwallet = "OVO"; break;
+                    case 2: namaEwallet = "GoPay"; break;
+                    case 3: namaEwallet = "Dana"; break;
+                    case 4: namaEwallet = "ShopeePay"; break;
+                    default: namaEwallet = "E-Wallet Lain"; break;
+                }
+                char refIDEwallet[40];
+                snprintf(refIDEwallet, sizeof(refIDEwallet), "EWL%s%03d-%03d",
+                         bufferDate, nomorStruk, kodeUnik);
+
+                cetak("Pembayaran via E-Wallet\n");
+                cetak("%-20s : %s\n", "Tipe", namaEwallet);
+                cetak("%-20s : %s\n", "RefID E-Wallet", refIDEwallet);
+                cetak("%-20s : %s\n", "Status", "LUNAS");
+                cetak("============================================================\n");
+            }
+
+            // FOOTER
+            cetak("------------------------------------------------------------\n");
+            cetakTengah("Terima kasih sudah berbelanja!", 60);
+            cetakTengah("Semoga lekas sehat!", 60);
+            cetak("============================================================\n");
+
+            // SIMPAN STRUK (transaksi sudah lunas)
             char namaFile[30];
-            sprintf(namaFile,"STRUK%03d.txt",nomorStruk);
+            snprintf(namaFile, sizeof(namaFile), "STRUK%03d.txt", nomorStruk);
 
-            FILE *f = fopen(namaFile,"w");
-            if(f){
-                fprintf(f,"%s", bufferStruk);
+            FILE* f = fopen(namaFile, "w");
+            if (f) {
+                fprintf(f, "%s", bufferStruk);
                 fclose(f);
                 printf("Struk berhasil disimpan di '%s'\n", namaFile);
 
-                // update counter (hanya jika lunas)
-                fcounter = fopen("counter.txt","w");
-                fprintf(fcounter,"%d", nomorStruk+1);
-                fclose(fcounter);
+                fcounter = fopen("counter.txt", "w");
+                if (fcounter) {
+                    fprintf(fcounter, "%d", nomorStruk + 1);
+                    fclose(fcounter);
+                }
             } else {
                 printf("Gagal membuat file struk!\n");
             }
         }
 
-        // Tanyakan mau transaksi lagi?
-        char lagi;
-        printf("\nApakah ingin melakukan transaksi lain? (y/n): ");
-        scanf(" %c",&lagi);
-        if(lagi=='y' || lagi=='Y') lanjutTransaksi=1;
-        else lanjutTransaksi=0;
+        // Transaksi lagi?
+        char lagi[8];
+        bacaTeks("\nApakah ingin melakukan transaksi lain? (y/n): ", lagi, sizeof(lagi));
+        lanjutTransaksi = (lagi[0] == 'y' || lagi[0] == 'Y');
 
-    } while(lanjutTransaksi);
+    } while (lanjutTransaksi);
 
+    sqlite3_close(db);
     printf("Program kasir selesai. Terima kasih!\n");
     return 0;
 }

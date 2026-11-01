@@ -7,7 +7,7 @@ CXXFLAGS = -Wall -g
 
 # Target utama untuk kompilasi
 all:
-	$(CXX) $(CXXFLAGS) main.cpp -o $(TARGET)
+	$(CXX) $(CXXFLAGS) main.cpp -o $(TARGET) -lsqlite3 -lsodium
 
 # Target untuk menjalankan program langsung setelah compile
 run: all
