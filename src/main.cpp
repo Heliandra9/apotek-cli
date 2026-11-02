@@ -316,7 +316,7 @@ int main() {
         int idx = 0;
         char fmt1[40], fmt2[40];
 
-        printf("\n=== PROGRAM KASIR DIEN MART ===\nDaftar Obat:\n");
+        printf("\n=== PROGRAM KASIR APOTEK ===\nDaftar Obat:\n");
         for (int i = 0; i < JUMLAH_OBAT; i++) {
             formatRupiah(daftarObat[i].harga, fmt1, sizeof(fmt1));
             printf("%2d. %-22s Rp. %s\n", daftarObat[i].kode, daftarObat[i].nama, fmt1);
@@ -376,7 +376,7 @@ int main() {
 
             // HEADER STRUK
             cetak("\n============================================================\n");
-            cetak("                         DIEN MART\n");
+            cetak("                         APOTEK\n");
             cetak("                Jl. Merdeka No.123, Surabaya\n");
             cetak("                    Telp: (031) 1234567\n");
             cetak("============================================================\n");
