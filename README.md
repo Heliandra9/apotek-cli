@@ -48,7 +48,7 @@ sudo apt update
 sudo apt install -y build-essential cmake pkg-config libsqlite3-dev libsodium-dev git
 ```
 
-### Arch Linux / Omarchy
+### Arch Linux
 
 ```bash
 sudo pacman -S --needed base-devel cmake pkgconf sqlite libsodium git
